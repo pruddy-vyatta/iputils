@@ -152,7 +152,7 @@ int ping6_run(struct ping_rts *rts, int argc, char **argv, struct addrinfo *ai,
 
 	rts->hostname = target;
 
-	if (IN6_IS_ADDR_UNSPECIFIED(&rts->source6.sin6_addr)) {
+	if (IN6_IS_ADDR_UNSPECIFIED(&rts->source6.sin6_addr) || rts->device) {
 		socklen_t alen;
 		int probe_fd = socket(AF_INET6, SOCK_DGRAM, 0);
 
@@ -212,9 +212,6 @@ int ping6_run(struct ping_rts *rts, int argc, char **argv, struct addrinfo *ai,
 						       &rts->source6.sin6_addr))
 					break;
 			}
-			if (!ifa)
-				error(0, 0, _("Warning: source address might be selected on device other than: %s"), rts->device);
-
 			freeifaddrs(ifa0);
 		}
 	} else if (rts->device && (IN6_IS_ADDR_LINKLOCAL(&rts->source6.sin6_addr) ||

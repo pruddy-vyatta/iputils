@@ -166,6 +166,7 @@ struct ping_rts {
 	int confirm;
 	int confirm_flag;
 	char *device;
+	char *addr_device;
 	int pmtudisc;
 
 	volatile int in_pr_addr;	/* pr_addr() is executing */

@@ -279,6 +279,7 @@ main(int argc, char **argv)
 		.source.sin_family = AF_INET,
 		.ni.query = -1,
 		.ni.subject_type = -1,
+		.addr_device = NULL,
 	};
 	/* FIXME: global_rts will be removed in future */
 	global_rts = &rts;
@@ -305,7 +306,7 @@ main(int argc, char **argv)
 		hints.ai_family = AF_INET6;
 
 	/* Parse command line options */
-	while ((ch = getopt(argc, argv, "h?" "4bRT:" "6F:N:" "aABc:dDfi:I:l:Lm:M:nOp:qQ:rs:S:t:UvVw:W:")) != EOF) {
+	while ((ch = getopt(argc, argv, "h?" "4bRT:" "6F:N:" "aABc:dDfi:I:l:Lm:M:nOp:qQ:rs:S:t:UvVw:W:Z:")) != EOF) {
 		switch(ch) {
 		/* IPv4 specific options */
 		case '4':
@@ -380,6 +381,7 @@ main(int argc, char **argv)
 		}
 			break;
 		case 'I':
+		case 'Z':
 			/* IPv6 */
 			if (strchr(optarg, ':')) {
 				char *p, *addr = strdup(optarg);
@@ -402,7 +404,12 @@ main(int argc, char **argv)
 			} else if (inet_pton(AF_INET, optarg, &rts.source.sin_addr) > 0) {
 				rts.opt_strictsource = 1;
 			} else {
-				rts.device = optarg;
+				if (ch == 'I')
+					rts.device = optarg;
+				if (ch == 'Z') {
+					rts.addr_device = optarg;
+					rts.opt_strictsource = 1;
+				}
 			}
 			break;
 		case 'l':
@@ -545,6 +552,76 @@ main(int argc, char **argv)
 	if (ret_val)
 		error(2, 0, "%s: %s", target, gai_strerror(ret_val));
 
+	/* get interface address if required */
+	if (rts.addr_device) {
+		struct ifaddrs *ifap, *ifa;
+		int found = 0, found6 = 0;
+		struct in6_addr *v6addr;
+		struct ifreq ifr;
+		int fd = (sock4.fd != -1) ? sock4.fd : sock6.fd;
+
+		/* check if interface is up */
+		memset(&ifr, 0, sizeof(ifr));
+		strncpy(ifr.ifr_name, rts.addr_device, IFNAMSIZ-1);
+		if (ioctl(fd, SIOCGIFFLAGS, &ifr) < 0) {
+			fprintf(stderr, "ping: SIOCGIFFLAGS for %s, %s\n",
+				rts.addr_device,strerror (errno));
+			freeaddrinfo(result);
+			exit(2);
+		}
+
+		if (!(ifr.ifr_flags & IFF_UP)) {
+			fprintf(stderr, "ping: interface %s is down\n",
+				rts.addr_device);
+			freeaddrinfo(result);
+			exit(2);
+		}
+
+		if (getifaddrs (&ifap) < 0) {
+			fprintf(stderr, "ping: getifaddrs failed, %s\n",
+				strerror (errno));
+			freeaddrinfo(result);
+			exit(2);
+		}
+		for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
+			if (ifa->ifa_addr &&
+			    (strncmp(ifa->ifa_name, rts.addr_device,
+				     IFNAMSIZ - 1) == 0)) {
+				if (!found && ifa->ifa_addr->sa_family ==
+				    AF_INET) {
+					if (rts.source.sin_addr.s_addr
+					    != htonl(INADDR_LOOPBACK)) {
+						found = 1;
+						rts.source =
+							*(struct sockaddr_in *)
+							ifa->ifa_addr;
+					}
+				}
+				else if (!found6 &&
+					 ifa->ifa_addr->sa_family == AF_INET6) {
+					v6addr = &rts.source6.sin6_addr;
+					if ((!IN6_IS_ADDR_LINKLOCAL(v6addr) &&
+					     !IN6_IS_ADDR_LOOPBACK(v6addr))) {
+						found6 = 1;
+						rts.source6 =
+							*(struct sockaddr_in6 *)
+							ifa->ifa_addr;
+					}
+				}
+				/* find first address for each AF */
+				if (found && found6)
+					break;
+			}
+		}
+		freeifaddrs(ifap);
+		if (!found && !found6) {
+			fprintf(stderr, "ping: No suitable addresses found on interface %s.\n", rts.addr_device);
+			freeaddrinfo(result);
+			exit(2);
+		}
+
+	}
+
 	for (ai = result; ai; ai = ai->ai_next) {
 		switch (ai->ai_family) {
 		case AF_INET:
@@ -632,7 +709,7 @@ int ping4_run(struct ping_rts *rts, int argc, char **argv, struct addrinfo *ai,
 		argv++;
 	}
 
-	if (rts->source.sin_addr.s_addr == 0) {
+	if (rts->source.sin_addr.s_addr == 0 || rts->device) {
 		socklen_t alen;
 		struct sockaddr_in dst = rts->whereto;
 		int probe_fd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -723,8 +800,6 @@ int ping4_run(struct ping_rts *rts, int argc, char **argv, struct addrinfo *ai,
 				disable_capability_raw();
 			}
 			freeifaddrs(ifa0);
-			if (!ifa)
-				error(0, 0, _("Warning: source address might be selected on device other than: %s"), rts->device);
 		}
 		close(probe_fd);
 

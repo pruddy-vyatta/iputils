@@ -74,6 +74,7 @@ void usage(void)
 		"  -V                 print version and exit\n"
 		"  -w <deadline>      reply wait <deadline> in seconds\n"
 		"  -W <timeout>       time to wait for response\n"
+		"  -Z <src-interface> use interface address\n"
 		"\nIPv4 options:\n"
 		"  -4                 use IPv4\n"
 		"  -b                 allow pinging broadcast\n"
